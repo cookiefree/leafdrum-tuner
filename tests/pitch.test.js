@@ -251,3 +251,37 @@ test('input buffer is not modified', () => {
   detectPitch(sig, 48000);
   assert.deepEqual(sig, copy);
 });
+
+test('a new strike over an old note still ringing: the new (stronger) note wins', () => {
+  const sr = 48000;
+  const note = (f, a, ph) => [[f, a], [2 * f, 0.3 * a], [2.76 * f, 0.15 * a]].map(([ff, aa], k) => [ff, aa, ph + k]);
+  const mix = (parts) => {
+    const b = new Float32Array(BUFFER_SIZE);
+    for (let i = 0; i < b.length; i++) {
+      let v = 0;
+      for (const [f, a, p] of parts) v += a * Math.sin((2 * Math.PI * f * i) / sr + p);
+      b[i] = v;
+    }
+    return b;
+  };
+  const cases = [
+    [392, 261.63, 0.4], // fifth below, old ring 40% as strong
+    [293.66, 392, 0.4], // old ring higher than the new note
+    [440, 261.63, 0.4],
+    [329.63, 261.63, 0.4],
+    [523.25, 261.63, 0.3], // old ring exactly an octave below the new note
+    [440, 220, 0.3],
+  ];
+  for (const [newF, oldF, ratio] of cases) {
+    const r = detectPitch(mix([...note(newF, 0.3, 0.5), ...note(oldF, 0.3 * ratio, 1.7)]), sr);
+    assert.ok(r, `null for new ${newF} over old ${oldF}`);
+    assert.ok(Math.abs(centsOff(r.freq, newF)) < 3, `new ${newF} over old ${oldF} read as ${r.freq.toFixed(1)}`);
+  }
+});
+
+test('a fundamental at 60% of the first overtone is still reported as the fundamental', () => {
+  const f0 = 261.63;
+  const r = detectPitch(makeSignal([[f0, 0.3], [2 * f0, 0.5]], 48000), 48000);
+  assert.ok(r);
+  assert.ok(Math.abs(centsOff(r.freq, f0)) < 3, `got ${r.freq}`);
+});

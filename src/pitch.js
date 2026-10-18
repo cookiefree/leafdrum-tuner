@@ -5,6 +5,8 @@
 // Stage 2: each candidate is checked and refined against a Hann-windowed spectrum.
 //          - A real fundamental has a spectral line at its frequency; a wrong
 //            sub-octave candidate does not, so octave-down errors are rejected.
+//          - If two notes sound at once (a new strike over a ringing old one),
+//            the strongest line wins: the new strike is the loudest.
 //          - Inharmonic overtones (typical for struck metal) bias the NSDF peak by
 //            several to tens of cents; the spectral line is not affected by them,
 //            so the final frequency comes from the spectrum.
@@ -44,6 +46,7 @@ function powerAt(x, win, sampleRate, f) {
 }
 
 // Find the spectral peak near f0: coarse scan, then golden-section search.
+// Returns null if there is no real spectral line near f0.
 function refineFrequency(x, win, sampleRate, f0, binHz) {
   // Strong inharmonic overtones can pull the NSDF estimate several percent away from
   // the true line, so search a wide neighbourhood (about +-3 semitones). The grid
@@ -87,7 +90,12 @@ function refineFrequency(x, win, sampleRate, f0, binHz) {
     }
   }
   const f = (a + b) / 2;
-  return { freq: f, power: powerAt(x, win, sampleRate, f) };
+  const power = powerAt(x, win, sampleRate, f);
+  // A real spectral line is a local maximum. If the power is still higher on
+  // either side, we converged on the skirt of a neighbouring note: reject.
+  if (powerAt(x, win, sampleRate, f - 0.5 * binHz) >= power) return null;
+  if (powerAt(x, win, sampleRate, f + 0.5 * binHz) >= power) return null;
+  return { freq: f, power };
 }
 
 /**
@@ -100,8 +108,12 @@ function refineFrequency(x, win, sampleRate, f0, binHz) {
  * @param {number} [opts.maxFreq=1500]         highest frequency to report (Hz)
  * @param {number} [opts.windowSize=2048]      samples analysed (taken from the end of buffer)
  * @param {number} [opts.candidateRatio=0.5]   NSDF peaks >= ratio * highest peak are candidates
- * @param {number} [opts.realRatio=0.15]       a candidate is "real" if its spectral amplitude
- *                                             is >= ratio * the strongest candidate's
+ * @param {number} [opts.realRatio=0.5]        a lower candidate (freq/2, /3, /4 of the strongest
+ *                                             line) replaces it as the fundamental if its
+ *                                             spectral amplitude is >= ratio * the strongest's.
+ *                                             Lower = trusts weak fundamentals more, but an
+ *                                             old note ringing an octave below a new strike
+ *                                             is more likely to be mistaken for the fundamental.
  * @param {number} [opts.minRms=0.005]         below this RMS the buffer counts as silence
  * @returns {{freq: number, clarity: number} | null}
  *   clarity is the NSDF value (0..1) at the chosen period: how periodic the signal is.
@@ -112,7 +124,7 @@ export function detectPitch(buffer, sampleRate, opts = {}) {
     maxFreq = 1500,
     windowSize = 2048,
     candidateRatio = 0.5,
-    realRatio = 0.15,
+    realRatio = 0.5,
     minRms = 0.005,
   } = opts;
   const MAX_CANDIDATES = 4;
@@ -190,20 +202,26 @@ export function detectPitch(buffer, sampleRate, opts = {}) {
     clarity = Math.min(1, clarity);
     const coarse = sampleRate / (lag + shift);
     const ref = refineFrequency(x, win, sampleRate, coarse, binHz);
+    if (!ref) return null;
     return { freq: ref.freq, amp: Math.sqrt(ref.power), clarity };
-  });
+  }).filter(Boolean);
+  if (cands.length === 0) return null;
 
-  let maxAmp = 0;
-  for (const c of cands) if (c.amp > maxAmp) maxAmp = c.amp;
-  if (maxAmp <= 0) return null;
+  // The strongest spectral line is the note that was just struck, even when an
+  // older note is still ringing underneath it (that one is weaker and decaying).
+  let strongest = cands[0];
+  for (const c of cands) if (c.amp > strongest.amp) strongest = c;
 
-  // Among candidates with a real spectral line, take the lowest frequency:
-  // that is the fundamental. Sub-octave candidates have no spectral line.
-  let chosen = null;
+  // Exception: if the strongest line is only an overtone of a lower line (that
+  // line is at freq/2, /3 or /4 and clearly present), the lower line is the
+  // real fundamental. Unrelated lower notes are NOT considered.
+  let chosen = strongest;
   for (const c of cands) {
-    if (c.amp >= realRatio * maxAmp && (chosen === null || c.freq < chosen.freq)) chosen = c;
+    if (c === strongest || c.amp < realRatio * strongest.amp || c.freq >= chosen.freq) continue;
+    const ratio = strongest.freq / c.freq;
+    const n = Math.round(ratio);
+    if (n >= 2 && n <= 4 && Math.abs(1200 * Math.log2(ratio / n)) < 60) chosen = c;
   }
-  if (!chosen) return null;
   if (!Number.isFinite(chosen.freq) || chosen.freq < minFreq || chosen.freq > maxFreq) return null;
 
   return { freq: chosen.freq, clarity: chosen.clarity };
