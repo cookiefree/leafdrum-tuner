@@ -22,9 +22,134 @@ body {
   padding: 1rem 1rem 0;
 }
 
-h1 {
-  font-size: 1.25rem;
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
   margin: 0.5rem 0 0.75rem;
+}
+
+.app-header h1 {
+  font-size: 1.25rem;
+  margin: 0;
+}
+
+.settings-button {
+  flex: 0 0 auto;
+  min-height: 2.75rem;
+  padding: 0 0.875rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  border: 1px solid #3c4043;
+  border-radius: 0.75rem;
+  background: #1e2126;
+  color: #e8eaed;
+  cursor: pointer;
+}
+
+.settings {
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  border: 1px solid #3c4043;
+  border-radius: 0.75rem;
+  background: #181b1f;
+}
+
+.setting {
+  margin-bottom: 1rem;
+}
+
+.setting:last-child {
+  margin-bottom: 0;
+}
+
+.setting > label {
+  display: block;
+  margin-bottom: 0.375rem;
+  font-size: 0.875rem;
+  color: #bdc1c6;
+}
+
+.setting-value {
+  color: #e8eaed;
+  font-variant-numeric: tabular-nums;
+}
+
+.setting-hint {
+  margin: 0.375rem 0 0;
+  font-size: 0.75rem;
+  color: #9aa0a6;
+}
+
+.a4-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.a4-row input {
+  flex: 1;
+  min-width: 0;
+  min-height: 2.75rem;
+  padding: 0 0.5rem;
+  font-size: 1rem;
+  border: 1px solid #3c4043;
+  border-radius: 0.5rem;
+  background: #1e2126;
+  color: #e8eaed;
+}
+
+.a4-quick {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.chip {
+  min-width: 3.5rem;
+  min-height: 2.75rem;
+  font-size: 1rem;
+  border: 1px solid #3c4043;
+  border-radius: 0.5rem;
+  background: #1e2126;
+  color: #e8eaed;
+  cursor: pointer;
+}
+
+.chip.active {
+  border-color: #8ab4f8;
+  background: #263445;
+  color: #d2e3fc;
+}
+
+#gate {
+  width: 100%;
+  min-height: 2.75rem;
+  accent-color: #8ab4f8;
+}
+
+.checkbox-setting {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.checkbox-setting input {
+  width: 1.25rem;
+  height: 1.25rem;
+  accent-color: #8ab4f8;
+}
+
+.checkbox-setting label {
+  margin: 0;
+  font-size: 0.9375rem;
+  color: #e8eaed;
+}
+
+.diagnostics {
+  margin: 0 0 1.5rem;
+  font-size: 0.8125rem;
+  color: #9aa0a6;
+  font-variant-numeric: tabular-nums;
 }
 
 .section-title {
@@ -77,6 +202,7 @@ h1 {
 
 .field {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
@@ -208,7 +334,7 @@ h1 {
 .slot.empty .slot-note {
   font-size: 0.9375rem;
   font-weight: 400;
-  color: #80868b;
+  color: #9aa0a6;
 }
 
 .slot-detail,
@@ -254,7 +380,8 @@ h1 {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.75rem;
-  padding: 0.75rem 0 1rem;
+  margin-top: 0.5rem;
+  padding: 0.75rem 0 calc(1rem + env(safe-area-inset-bottom, 0px));
   background: #121417;
   border-top: 1px solid #2a2d31;
 }
@@ -287,6 +414,8 @@ h1 {
 .button:focus-visible,
 .preset:focus-visible,
 .slot:focus-visible,
+.settings-button:focus-visible,
+.chip:focus-visible,
 select:focus-visible,
 input:focus-visible {
   outline: 2px solid #8ab4f8;
