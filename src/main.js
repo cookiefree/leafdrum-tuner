@@ -1,8 +1,10 @@
 import {
   CONFIDENT_CLARITY,
+  DEFAULT_INPUT_GAIN,
   NOISE_GATE_RMS,
   getAudioSupportIssue,
   isAudioRunning,
+  setInputGain,
   startAudio,
   stopAudio,
 } from "./audio.js";
@@ -22,10 +24,13 @@ const MAX_A4 = 480;
 const A4_QUICK_CHOICES = [432, 440];
 const MIN_GATE = 0.005;
 const MAX_GATE = 0.1;
+const MIN_INPUT_GAIN = 1;
+const MAX_INPUT_GAIN = 30;
 
 const STORAGE_KEYS = {
   a4: "leafdrum.a4",
   gate: "leafdrum.gate",
+  inputGain: "leafdrum.inputGain",
   diagnostics: "leafdrum.diagnostics",
   leafCount: "leafdrum.leafCount",
 };
@@ -57,6 +62,7 @@ function writeStored(key, value) {
 
 let a4 = A4_DEFAULT;
 let gate = NOISE_GATE_RMS;
+let inputGain = DEFAULT_INPUT_GAIN;
 let showDiagnostics = false;
 
 const storedA4 = readStored(
@@ -70,6 +76,13 @@ const storedGate = readStored(
   (value) => typeof value === "number" && value >= MIN_GATE && value <= MAX_GATE,
 );
 if (storedGate !== null) gate = storedGate;
+
+const storedInputGain = readStored(
+  STORAGE_KEYS.inputGain,
+  (value) => typeof value === "number" && value >= MIN_INPUT_GAIN && value <= MAX_INPUT_GAIN,
+);
+if (storedInputGain !== null) inputGain = storedInputGain;
+setInputGain(inputGain);
 
 const storedDiagnostics = readStored(STORAGE_KEYS.diagnostics, (value) => typeof value === "boolean");
 if (storedDiagnostics !== null) showDiagnostics = storedDiagnostics;
@@ -98,6 +111,11 @@ app.innerHTML = `
         <input id="a4" type="number" min="400" max="480" step="1" inputmode="decimal">
         <div id="a4-quick" class="a4-quick"></div>
       </div>
+    </div>
+    <div class="setting">
+      <label for="input-gain">Input gain: <span id="input-gain-value" class="setting-value"></span></label>
+      <input id="input-gain" type="range" min="1" max="30" step="1">
+      <p class="setting-hint">Amplifies a quiet microphone. Raise it if strikes are missed; lower it if the readout is unstable.</p>
     </div>
     <div class="setting">
       <label for="gate">Sensitivity (noise gate): <span id="gate-value" class="setting-value"></span></label>
@@ -159,6 +177,8 @@ const settingsToggle = document.getElementById("settings-toggle");
 const settingsSection = document.getElementById("settings");
 const a4Input = document.getElementById("a4");
 const a4Quick = document.getElementById("a4-quick");
+const inputGainSlider = document.getElementById("input-gain");
+const inputGainValue = document.getElementById("input-gain-value");
 const gateSlider = document.getElementById("gate");
 const gateValue = document.getElementById("gate-value");
 const diagnosticsCheckbox = document.getElementById("diagnostics");
@@ -201,6 +221,7 @@ let wakeLock = null;
 function persistSettings() {
   writeStored(STORAGE_KEYS.a4, a4);
   writeStored(STORAGE_KEYS.gate, gate);
+  writeStored(STORAGE_KEYS.inputGain, inputGain);
   writeStored(STORAGE_KEYS.diagnostics, showDiagnostics);
   writeStored(STORAGE_KEYS.leafCount, session.leafCount);
 }
@@ -249,6 +270,7 @@ function updateDiagnostics(frame) {
   if (!showDiagnostics) return;
   const parts = [
     `rms ${frame.rms.toFixed(3)}`,
+    `gain ${inputGain}x`,
     `clarity ${frame.clarity.toFixed(2)}`,
     `gate ${gate.toFixed(3)}`,
   ];
@@ -331,6 +353,8 @@ function syncSettingsControls() {
     button.classList.toggle("active", active);
     button.setAttribute("aria-pressed", String(active));
   }
+  inputGainSlider.value = String(inputGain);
+  inputGainValue.textContent = `${inputGain}x`;
   gateSlider.value = String(gateToSlider(gate));
   gateValue.textContent = gate.toFixed(3);
   diagnosticsCheckbox.checked = showDiagnostics;
@@ -513,6 +537,13 @@ a4Input.addEventListener("change", () => {
 a4Quick.addEventListener("click", (event) => {
   const button = event.target.closest(".chip");
   if (button) requestA4(Number(button.dataset.a4));
+});
+
+inputGainSlider.addEventListener("input", () => {
+  inputGain = Number(inputGainSlider.value);
+  setInputGain(inputGain);
+  inputGainValue.textContent = `${inputGain}x`;
+  persistSettings();
 });
 
 gateSlider.addEventListener("input", () => {

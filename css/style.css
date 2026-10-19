@@ -121,7 +121,8 @@ body {
   color: #d2e3fc;
 }
 
-#gate {
+#gate,
+#input-gain {
   width: 100%;
   min-height: 2.75rem;
   accent-color: #8ab4f8;

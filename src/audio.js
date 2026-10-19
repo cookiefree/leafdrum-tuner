@@ -2,15 +2,18 @@ import { detectPitch } from "./pitch.js";
 
 export const CONFIDENT_CLARITY = 0.75;
 export const NOISE_GATE_RMS = 0.02;
+export const DEFAULT_INPUT_GAIN = 8;
 
 const FFT_SIZE = 4096;
 const PITCH_WINDOW = 2048;
 
 let audioContext = null;
 let mediaStream = null;
+let gainNode = null;
 let analyser = null;
 let frameBuffer = null;
 let frameHandle = null;
+let inputGain = DEFAULT_INPUT_GAIN;
 
 export function getAudioSupportIssue() {
   if (!window.isSecureContext) return "insecure-context";
@@ -22,6 +25,13 @@ export function getAudioSupportIssue() {
 
 export function isAudioRunning() {
   return frameHandle !== null;
+}
+
+export function setInputGain(value) {
+  inputGain = value;
+  if (gainNode) {
+    gainNode.gain.value = value;
+  }
 }
 
 export async function startAudio(onFrame) {
@@ -44,10 +54,13 @@ export async function startAudio(onFrame) {
     });
 
     const source = audioContext.createMediaStreamSource(mediaStream);
+    gainNode = audioContext.createGain();
+    gainNode.gain.value = inputGain;
     analyser = audioContext.createAnalyser();
     analyser.fftSize = FFT_SIZE;
     analyser.smoothingTimeConstant = 0;
-    source.connect(analyser);
+    source.connect(gainNode);
+    gainNode.connect(analyser);
     frameBuffer = new Float32Array(FFT_SIZE);
 
     const tick = () => {
@@ -92,6 +105,7 @@ export function stopAudio() {
     mediaStream = null;
   }
   analyser = null;
+  gainNode = null;
   frameBuffer = null;
   if (audioContext) {
     audioContext.close();
