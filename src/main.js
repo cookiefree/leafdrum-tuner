@@ -8,17 +8,14 @@ import {
   startAudio,
   stopAudio,
 } from "./audio.js";
+import { createDrumView } from "./drumview.js";
+import layout from "./layout.js";
 import { describeFreq } from "./notes.js";
 import { StrikeDetector } from "./onset.js";
 import { Session } from "./session.js";
 
 const A4_DEFAULT = 440;
 const DASH = "-";
-const QUICK_PRESETS = [8, 11, 15];
-const PRESET_MIN = 5;
-const PRESET_MAX = 15;
-const MIN_LEAVES = 1;
-const MAX_LEAVES = 30;
 const MIN_A4 = 400;
 const MAX_A4 = 480;
 const A4_QUICK_CHOICES = [432, 440];
@@ -32,7 +29,6 @@ const STORAGE_KEYS = {
   gate: "leafdrum.gate",
   inputGain: "leafdrum.inputGain",
   diagnostics: "leafdrum.diagnostics",
-  leafCount: "leafdrum.leafCount",
 };
 
 const SUPPORT_MESSAGES = {
@@ -88,13 +84,7 @@ const storedDiagnostics = readStored(STORAGE_KEYS.diagnostics, (value) => typeof
 if (storedDiagnostics !== null) showDiagnostics = storedDiagnostics;
 
 const detector = new StrikeDetector({ a4, gate });
-const session = new Session(8);
-
-const storedLeafCount = readStored(
-  STORAGE_KEYS.leafCount,
-  (value) => Number.isInteger(value) && value >= MIN_LEAVES && value <= MAX_LEAVES,
-);
-if (storedLeafCount !== null) session.setLeafCount(storedLeafCount);
+const session = new Session(layout.tongues.length);
 
 const app = document.getElementById("app");
 
@@ -128,20 +118,6 @@ app.innerHTML = `
     </div>
   </section>
   <p id="status" class="status" role="status">Tap Start to allow the microphone.</p>
-  <section class="leaf-count" aria-labelledby="leaves-title">
-    <h2 id="leaves-title" class="section-title">Leaves</h2>
-    <div id="presets" class="presets"></div>
-    <div class="count-inputs">
-      <div class="field">
-        <label for="preset-select">Other preset</label>
-        <select id="preset-select"></select>
-      </div>
-      <div class="field">
-        <label for="custom-count">Custom (1-30)</label>
-        <input id="custom-count" type="number" min="1" max="30" inputmode="numeric">
-      </div>
-    </div>
-  </section>
   <section class="readout">
     <h2 class="section-title">Microphone</h2>
     <div id="note" class="note">-</div>
@@ -157,19 +133,21 @@ app.innerHTML = `
     </div>
   </section>
   <p id="diagnostics-line" class="diagnostics hidden"></p>
-  <section>
-    <h2 class="section-title">Leaves in playing order</h2>
-    <div id="slots" class="slots"></div>
+  <section class="drum" aria-labelledby="drum-title">
+    <h2 id="drum-title" class="section-title">Your drum</h2>
+    <div id="drum-view" class="drum-view"></div>
+    <p id="drum-caption" class="drum-caption" aria-live="polite"></p>
   </section>
   <section id="sorted" class="sorted hidden">
     <h2 class="section-title">Sorted by pitch</h2>
     <div id="sorted-notes" class="sorted-notes"></div>
     <p id="sorted-summary" class="sorted-summary hidden"></p>
   </section>
-  <p id="feedback" class="feedback" role="status">Tap Start, then strike a leaf.</p>
+  <p id="feedback" class="feedback" role="status">Tap Start, then strike a tongue.</p>
   <div class="controls">
     <button id="toggle" class="button primary" type="button">Start</button>
     <button id="reset" class="button secondary" type="button">Reset</button>
+    <button id="copy" class="button secondary copy-button" type="button">Copy results</button>
   </div>
 `;
 
@@ -184,31 +162,19 @@ const gateValue = document.getElementById("gate-value");
 const diagnosticsCheckbox = document.getElementById("diagnostics");
 const diagnosticsLine = document.getElementById("diagnostics-line");
 const statusLine = document.getElementById("status");
-const presetsContainer = document.getElementById("presets");
-const presetSelect = document.getElementById("preset-select");
-const customInput = document.getElementById("custom-count");
 const noteLine = document.getElementById("note");
 const hzLine = document.getElementById("hz");
 const centsLine = document.getElementById("cents");
 const meterMarker = document.getElementById("meter-marker");
-const slotsContainer = document.getElementById("slots");
+const drumContainer = document.getElementById("drum-view");
+const drumCaption = document.getElementById("drum-caption");
 const sortedSection = document.getElementById("sorted");
 const sortedNotes = document.getElementById("sorted-notes");
 const sortedSummary = document.getElementById("sorted-summary");
 const feedbackLine = document.getElementById("feedback");
 const toggleButton = document.getElementById("toggle");
 const resetButton = document.getElementById("reset");
-
-presetsContainer.innerHTML = QUICK_PRESETS.map(
-  (count) =>
-    `<button type="button" class="preset" data-count="${count}" aria-pressed="false">${count}</button>`,
-).join("");
-
-let presetOptions = "";
-for (let count = PRESET_MIN; count <= PRESET_MAX; count += 1) {
-  presetOptions += `<option value="${count}">${count}</option>`;
-}
-presetSelect.innerHTML = presetOptions;
+const copyButton = document.getElementById("copy");
 
 a4Quick.innerHTML = A4_QUICK_CHOICES.map(
   (value) =>
@@ -223,7 +189,6 @@ function persistSettings() {
   writeStored(STORAGE_KEYS.gate, gate);
   writeStored(STORAGE_KEYS.inputGain, inputGain);
   writeStored(STORAGE_KEYS.diagnostics, showDiagnostics);
-  writeStored(STORAGE_KEYS.leafCount, session.leafCount);
 }
 
 function gateToSlider(gateHz) {
@@ -278,27 +243,18 @@ function updateDiagnostics(frame) {
   diagnosticsLine.textContent = parts.join(" | ");
 }
 
-function renderSlots() {
-  slotsContainer.innerHTML = session.slots
-    .map((slot, index) => {
-      const isActive = index === session.activeSlot;
-      const classes = `slot${isActive ? " active" : ""}${slot === null ? " empty" : ""}`;
-      const activeAttr = isActive ? ' aria-current="true"' : "";
-      if (slot === null) {
-        return `<button type="button" class="${classes}" data-index="${index}"${activeAttr}>
-            <span class="slot-leaf">Leaf ${index + 1}</span>
-            <span class="slot-note">waiting</span>
-          </button>`;
-      }
-      const sign = slot.cents >= 0 ? "+" : "-";
-      return `<button type="button" class="${classes}" data-index="${index}"${activeAttr}>
-          <span class="slot-leaf">Leaf ${index + 1}</span>
-          <span class="slot-note">${slot.label}</span>
-          <span class="slot-detail">${slot.freq.toFixed(1)} Hz</span>
-          <span class="slot-cents">${sign}${Math.abs(slot.cents).toFixed(1)} cents</span>
-        </button>`;
-    })
-    .join("");
+function updateDrumCaption() {
+  if (session.activeSlot === null) {
+    drumCaption.textContent = "All tongues recorded.";
+    return;
+  }
+  const tongue = layout.tongues[session.activeSlot];
+  drumCaption.textContent = `Play: ${tongue.label} (${session.activeSlot + 1} of ${layout.tongues.length})`;
+}
+
+function renderDrum() {
+  drumView.update();
+  updateDrumCaption();
 }
 
 function summaryText(sorted) {
@@ -333,19 +289,6 @@ function renderSorted() {
   }
 }
 
-function syncCountControls() {
-  for (const button of presetsContainer.querySelectorAll(".preset")) {
-    const active = Number(button.dataset.count) === session.leafCount;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-pressed", String(active));
-  }
-  presetSelect.value =
-    session.leafCount >= PRESET_MIN && session.leafCount <= PRESET_MAX
-      ? String(session.leafCount)
-      : "";
-  customInput.value = String(session.leafCount);
-}
-
 function syncSettingsControls() {
   a4Input.value = String(a4);
   for (const button of a4Quick.querySelectorAll(".chip")) {
@@ -359,36 +302,6 @@ function syncSettingsControls() {
   gateValue.textContent = gate.toFixed(3);
   diagnosticsCheckbox.checked = showDiagnostics;
   diagnosticsLine.classList.toggle("hidden", !showDiagnostics);
-}
-
-function requestLeafCount(newCount) {
-  if (!Number.isInteger(newCount) || newCount < MIN_LEAVES || newCount > MAX_LEAVES) {
-    syncCountControls();
-    return;
-  }
-  if (newCount === session.leafCount) {
-    syncCountControls();
-    return;
-  }
-
-  const dropped = session.wouldDrop(newCount);
-  if (dropped.length > 0) {
-    const labels = dropped.map((slot) => slot.label).join(", ");
-    const plural = dropped.length === 1 ? "note" : "notes";
-    const confirmed = window.confirm(
-      `Changing to ${newCount} leaves will drop ${dropped.length} recorded ${plural} (${labels}). Continue?`,
-    );
-    if (!confirmed) {
-      syncCountControls();
-      return;
-    }
-  }
-
-  session.setLeafCount(newCount);
-  renderSlots();
-  renderSorted();
-  syncCountControls();
-  persistSettings();
 }
 
 function requestA4(newA4) {
@@ -417,12 +330,24 @@ function requestA4(newA4) {
   detector.setOptions({ a4 });
   if (recordedCount > 0) {
     session.reset();
-    renderSlots();
+    renderDrum();
     renderSorted();
-    setFeedback("Recorded leaves were cleared after the reference pitch change.");
+    setFeedback("Recorded tongues were cleared after the reference pitch change.");
   }
   syncSettingsControls();
   persistSettings();
+}
+
+function resultsText() {
+  return layout.tongues
+    .map((tongue, index) => {
+      const slot = session.slots[index];
+      const prefix = `${tongue.groupName}, ${tongue.size}: `;
+      if (slot === null) return `${prefix}not recorded`;
+      const sign = slot.cents >= 0 ? "+" : "-";
+      return `${prefix}${slot.label} (${slot.freq.toFixed(1)} Hz, ${sign}${Math.abs(slot.cents).toFixed(1)} cents)`;
+    })
+    .join("\n");
 }
 
 function handleStrikeEvent(event) {
@@ -435,7 +360,7 @@ function handleStrikeEvent(event) {
     lastStrikeText = `last strike: failed (${event.reason})`;
     setFeedback(
       event.reason === "inconsistent"
-        ? "Unclear note (two leaves at once, or the previous sound still ringing). Let it fade and try again."
+        ? "Unclear note (two tongues at once, or the previous sound still ringing). Let it fade and try again."
         : "Could not read that strike, try again",
     );
     return;
@@ -446,18 +371,18 @@ function handleStrikeEvent(event) {
   const result = session.addStrike(record);
 
   if (result.status === "filled") {
-    setFeedback(`Recorded ${record.label} in leaf ${result.slot + 1}`);
-    renderSlots();
+    setFeedback(`Recorded ${record.label} on ${layout.tongues[result.slot].label}`);
+    renderDrum();
     renderSorted();
     return;
   }
 
   if (result.status === "duplicate") {
-    setFeedback(`Already recorded as leaf ${result.existingSlot + 1}`);
+    setFeedback(`Already recorded on ${layout.tongues[result.existingSlot].label}`);
     return;
   }
 
-  setFeedback("All leaves recorded. Tap a leaf to re-record, or press Reset.");
+  setFeedback("All tongues recorded. Tap a tongue to re-record, or press Reset.");
 }
 
 function handleAudioFrame(frame) {
@@ -525,6 +450,13 @@ function describeAudioError(error) {
   }
 }
 
+const drumView = createDrumView(layout, session, {
+  onSelect() {
+    updateDrumCaption();
+  },
+});
+drumContainer.append(drumView.element);
+
 settingsToggle.addEventListener("click", () => {
   const nowHidden = settingsSection.classList.toggle("hidden");
   settingsToggle.setAttribute("aria-expanded", String(!nowHidden));
@@ -559,29 +491,19 @@ diagnosticsCheckbox.addEventListener("change", () => {
   persistSettings();
 });
 
-presetsContainer.addEventListener("click", (event) => {
-  const button = event.target.closest(".preset");
-  if (button) requestLeafCount(Number(button.dataset.count));
-});
-
-presetSelect.addEventListener("change", () => {
-  if (presetSelect.value) requestLeafCount(Number(presetSelect.value));
-});
-
-customInput.addEventListener("change", () => {
-  requestLeafCount(Number(customInput.value));
-});
-
-slotsContainer.addEventListener("click", (event) => {
-  const card = event.target.closest(".slot");
-  if (!card) return;
-  session.selectSlot(Number(card.dataset.index));
-  renderSlots();
+copyButton.addEventListener("click", async () => {
+  if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") return;
+  try {
+    await navigator.clipboard.writeText(resultsText());
+    setFeedback("Copied results to the clipboard.");
+  } catch {
+    // Clipboard access can be denied; fail silently.
+  }
 });
 
 toggleButton.addEventListener("click", async () => {
   if (isAudioRunning()) {
-    stopListening("Stopped. Recorded leaves are kept.");
+    stopListening("Stopped. Recorded tongues are kept.");
     return;
   }
 
@@ -591,7 +513,7 @@ toggleButton.addEventListener("click", async () => {
     await startAudio(handleAudioFrame);
     acquireWakeLock();
     toggleButton.textContent = "Stop";
-    statusLine.textContent = "Listening. Strike the leaves one at a time.";
+    statusLine.textContent = "Listening. Strike each tongue one at a time.";
     setFeedback("Listening");
   } catch (error) {
     stopListening(describeAudioError(error));
@@ -602,9 +524,9 @@ toggleButton.addEventListener("click", async () => {
 
 resetButton.addEventListener("click", () => {
   session.reset();
-  renderSlots();
+  renderDrum();
   renderSorted();
-  setFeedback("Cleared all leaves.");
+  setFeedback("Cleared all tongues.");
 });
 
 document.addEventListener("visibilitychange", () => {
@@ -619,8 +541,7 @@ if (supportIssue) {
   statusLine.textContent = SUPPORT_MESSAGES[supportIssue];
 }
 
-renderSlots();
+renderDrum();
 renderSorted();
-syncCountControls();
 syncSettingsControls();
 clearReadout();

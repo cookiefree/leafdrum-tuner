@@ -1,6 +1,6 @@
 # Leaf Drum Note Finder
 
-A static website that listens through the microphone and tells you which musical note each leaf of a leaf drum (tongue drum) plays. Tap Start, choose how many leaves your drum has, then strike the leaves one at a time: each strike fills the next slot with the note name, octave, frequency, and cents offset from the nearest note. All audio processing happens on the device; nothing is recorded, stored, or sent anywhere.
+A static website that listens through the microphone and tells you which musical note each leaf of a leaf drum (tongue drum) plays. The app shows a guided 9-group, 27-tongue drum: tap Start, then strike the tongue highlighted in the drawing. Each strike fills that tongue with the note name, octave, frequency, and cents offset from the nearest note. The sorted-by-pitch strip updates as you go, and Copy results copies the scan as plain text. All audio processing happens on the device; nothing is recorded, stored, or sent anywhere.
 
 ## Run locally
 
