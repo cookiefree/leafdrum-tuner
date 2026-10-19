@@ -84,7 +84,7 @@ function emitFrame(onFrame) {
   }
   const rms = Math.sqrt(sumOfSquares / samples.length);
 
-  const reading = detectPitch(samples, audioContext.sampleRate);
+  const reading = detectPitch(samples, audioContext.sampleRate, { minFreq: 60 });
   onFrame({
     rms,
     freq: reading ? reading.freq : null,
