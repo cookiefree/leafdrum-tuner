@@ -23,4 +23,4 @@ The microphone only works in a secure context (HTTPS or localhost), so open the 
 
 All asset paths are relative, so the site works from the project subpath (for example `https://<user>.github.io/leafdrum-tuner/`).
 
-Live URL: TODO (add the published URL here after the first deployment)
+Live URL: https://cookiefree.github.io/leafdrum-tuner/
