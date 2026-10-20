@@ -184,6 +184,24 @@ a4Quick.innerHTML = A4_QUICK_CHOICES.map(
 let lastStrikeText = "";
 let wakeLock = null;
 
+const diagnosticsStats = {
+  onsets: 0,
+  ok: 0,
+  failed: 0,
+  tooFew: 0,
+  inconsistent: 0,
+  peakRms: 0,
+};
+
+function resetDiagnosticsStats() {
+  diagnosticsStats.onsets = 0;
+  diagnosticsStats.ok = 0;
+  diagnosticsStats.failed = 0;
+  diagnosticsStats.tooFew = 0;
+  diagnosticsStats.inconsistent = 0;
+  diagnosticsStats.peakRms = 0;
+}
+
 function persistSettings() {
   writeStored(STORAGE_KEYS.a4, a4);
   writeStored(STORAGE_KEYS.gate, gate);
@@ -235,9 +253,11 @@ function updateDiagnostics(frame) {
   if (!showDiagnostics) return;
   const parts = [
     `rms ${frame.rms.toFixed(3)}`,
+    `peak rms ${diagnosticsStats.peakRms.toFixed(3)}`,
     `gain ${inputGain}x`,
     `clarity ${frame.clarity.toFixed(2)}`,
     `gate ${gate.toFixed(3)}`,
+    `onsets ${diagnosticsStats.onsets} | ok ${diagnosticsStats.ok} | failed ${diagnosticsStats.failed} (too-few ${diagnosticsStats.tooFew}, inconsistent ${diagnosticsStats.inconsistent})`,
   ];
   if (lastStrikeText) parts.push(lastStrikeText);
   diagnosticsLine.textContent = parts.join(" | ");
@@ -352,11 +372,19 @@ function resultsText() {
 
 function handleStrikeEvent(event) {
   if (event.type === "onset") {
+    diagnosticsStats.onsets += 1;
+    diagnosticsStats.peakRms = 0;
     setFeedback("Listening to that strike...");
     return;
   }
 
   if (event.type === "strike-failed") {
+    diagnosticsStats.failed += 1;
+    if (event.reason === "inconsistent") {
+      diagnosticsStats.inconsistent += 1;
+    } else {
+      diagnosticsStats.tooFew += 1;
+    }
     lastStrikeText = `last strike: failed (${event.reason})`;
     setFeedback(
       event.reason === "inconsistent"
@@ -366,6 +394,7 @@ function handleStrikeEvent(event) {
     return;
   }
 
+  diagnosticsStats.ok += 1;
   lastStrikeText = `last strike: ${event.readingsUsed}/${event.readingsTotal} readings, ${event.freq.toFixed(1)} Hz`;
   const record = describeFreq(event.freq, a4);
   const result = session.addStrike(record);
@@ -387,7 +416,6 @@ function handleStrikeEvent(event) {
 
 function handleAudioFrame(frame) {
   showReading(frame);
-  updateDiagnostics(frame);
   const events = detector.push({
     time: frame.time,
     rms: frame.rms,
@@ -397,6 +425,8 @@ function handleAudioFrame(frame) {
   for (const event of events) {
     handleStrikeEvent(event);
   }
+  if (frame.rms > diagnosticsStats.peakRms) diagnosticsStats.peakRms = frame.rms;
+  updateDiagnostics(frame);
 }
 
 function acquireWakeLock() {
@@ -509,6 +539,7 @@ toggleButton.addEventListener("click", async () => {
 
   toggleButton.disabled = true;
   try {
+    resetDiagnosticsStats();
     detector.reset();
     await startAudio(handleAudioFrame);
     acquireWakeLock();
