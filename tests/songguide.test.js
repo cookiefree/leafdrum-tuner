@@ -259,3 +259,28 @@ test('SongGuide: repeated notes need repeated strikes', () => {
   g.heard(50);
   assert.equal(g.done, true);
 });
+
+test('SongGuide: upcoming() lists the next playable steps', () => {
+  const g = mk([50, 52, 54, 53, 55, 57]); // 54 is not on the drum
+  assert.deepEqual(g.upcoming(2).map((s) => s.midi), [52, 53]);
+  assert.deepEqual(g.upcoming(3).map((s) => s.midi), [52, 53, 55]);
+  g.heard(50);
+  assert.deepEqual(g.upcoming(2).map((s) => s.midi), [53, 55]);
+});
+
+test('SongGuide: upcoming() near the end and when finished', () => {
+  const g = mk([50, 52, 53]);
+  g.heard(50);
+  assert.deepEqual(g.upcoming(2).map((s) => s.midi), [53]);
+  g.heard(52);
+  assert.deepEqual(g.upcoming(2), []);
+  g.heard(53);
+  assert.deepEqual(g.upcoming(2), []);
+});
+
+test('SongGuide: upcoming() respects the part range and skipMissing=false', () => {
+  const g = mk([50, 52, 53, 55, 57], undefined, { start: 1, end: 3 });
+  assert.deepEqual(g.upcoming(5).map((s) => s.midi), [53]);
+  const h = mk([50, 54, 52], [50, 52], { skipMissing: false });
+  assert.deepEqual(h.upcoming(2).map((s) => s.midi), [54, 52]);
+});

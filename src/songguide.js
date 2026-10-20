@@ -171,6 +171,20 @@ export class SongGuide {
     return p < this.end ? this.steps[p] : null;
   }
 
+  /**
+   * The next `count` steps after the current one (for showing what comes next).
+   * Skips notes the drum cannot play when skipMissing is on.
+   */
+  upcoming(count = 2) {
+    const out = [];
+    let p = this.pos + 1;
+    while (p < this.end && out.length < count) {
+      if (!(this.skipMissing && this.steps[p].missing)) out.push(this.steps[p]);
+      p++;
+    }
+    return out;
+  }
+
   progress() {
     let missing = 0;
     for (let i = this.start; i < this.end; i++) if (this.steps[i].missing) missing++;
