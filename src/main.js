@@ -696,12 +696,17 @@ function updateGuideView() {
   const current = activeGuide.current();
 
   if (!current) {
-    drumView.setGuideIndices([]);
+    drumView.setGuideLookahead({ now: [], next: [], after: [] });
     drumCaption.textContent = "Finished";
     return;
   }
 
-  drumView.setGuideIndices(current.indices);
+  const upcoming = activeGuide.upcoming(2);
+  drumView.setGuideLookahead({
+    now: current.indices,
+    next: upcoming[0] ? upcoming[0].indices : [],
+    after: upcoming[1] ? upcoming[1].indices : [],
+  });
   const next = activeGuide.peekNext();
   const total = activeGuide.steps.length;
   const nextText = next ? `  next: ${next.name}` : "";
@@ -733,7 +738,7 @@ function startGuide() {
 function exitGuide() {
   activeGuide = null;
   setGuideMode(false);
-  drumView.setGuideIndices(null);
+  drumView.setGuideLookahead(null);
   renderDrum();
   setFeedback("Guide ended. Scan mode is active.");
 }

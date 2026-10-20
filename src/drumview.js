@@ -5,6 +5,9 @@ const RING_RADIUS = 140;
 const RIM_RADIUS = 184;
 const CENTER_SCALE = 1.25;
 const HALO_EXTRA = 10;
+const GUIDE_ROLES = { now: 1, next: 2, after: 3 };
+const BADGE_X = 20.5;
+const BADGE_Y = -10;
 
 const TONGUE_GEOMETRY = {
   big: { radius: 44, crown: -50, leg: 32, stroke: 15 },
@@ -72,17 +75,22 @@ function crownPosition(placement, crown) {
   };
 }
 
-function ariaLabel(tongue, slot, active, guided) {
+function ariaLabel(tongue, slot, active, role) {
   const state = slot === null ? "Waiting" : slot.label;
   if (!active) return `${tongue.label}. ${state}.`;
-  return `${tongue.label}. ${state}. ${guided ? "Play this note now." : "Next to play."}`;
+  if (role === "now") return `${tongue.label}. ${state}. Play this note now.`;
+  if (role === "next") return `${tongue.label}. ${state}. Up next.`;
+  if (role === "after") return `${tongue.label}. ${state}. Coming after next.`;
+  return `${tongue.label}. ${state}. Next to play.`;
 }
 
 export function createDrumView(layout, session, options = {}) {
   const groups = groupTongues(layout);
   const tongueElements = new Array(layout.tongues.length);
   const noteElements = new Array(layout.tongues.length);
-  let guideIndices = null;
+  const badgeElements = new Array(layout.tongues.length);
+  const badgeTextElements = new Array(layout.tongues.length);
+  let guideRoles = null;
 
   const svg = createSvgElement("svg", {
     viewBox: `0 0 ${VIEW_SIZE} ${VIEW_SIZE}`,
@@ -105,6 +113,11 @@ export function createDrumView(layout, session, options = {}) {
     "aria-hidden": "true",
   });
 
+  const badges = createSvgElement("g", {
+    class: "drum-badges",
+    "aria-hidden": "true",
+  });
+
   groups.forEach((group, groupIndex) => {
     const placement = groupPlacement(groupIndex, groups.length);
     const groupElement = createSvgElement("g", {
@@ -122,7 +135,7 @@ export function createDrumView(layout, session, options = {}) {
         tabindex: "0",
         focusable: "true",
         role: "button",
-        "aria-label": ariaLabel(tongue, null, false),
+        "aria-label": ariaLabel(tongue, null, false, null),
       });
 
       tongueElement.append(
@@ -151,40 +164,84 @@ export function createDrumView(layout, session, options = {}) {
       });
       noteElements[index] = note;
       labels.append(note);
+
+      const badgeX = (crown.x + BADGE_X).toFixed(2);
+      const badgeY = (crown.y + BADGE_Y).toFixed(2);
+      const badge = createSvgElement("g", {
+        class: "guide-badge hidden",
+        "data-index": index,
+        transform: `translate(${badgeX} ${badgeY})`,
+      });
+      const badgeText = createSvgElement("text", {
+        class: "guide-badge-text",
+        "text-anchor": "middle",
+        "dominant-baseline": "central",
+      });
+      badge.append(
+        createSvgElement("circle", {
+          class: "guide-badge-disc",
+          r: 9.5,
+        }),
+        badgeText,
+      );
+      badgeElements[index] = badge;
+      badgeTextElements[index] = badgeText;
+      badges.append(badge);
     }
 
     svg.append(groupElement);
   });
 
-  svg.append(labels);
+  svg.append(labels, badges);
 
   function update() {
-    const guided = guideIndices !== null;
+    const guided = guideRoles !== null;
     layout.tongues.forEach((tongue, index) => {
       const slot = session.slots[index];
-      const active = guided ? guideIndices.has(index) : session.activeSlot === index;
+      const role = guided ? (guideRoles.get(index) || null) : null;
+      const active = guided ? role !== null : session.activeSlot === index;
       const element = tongueElements[index];
+      const badge = badgeElements[index];
 
       element.classList.toggle("pending", slot === null);
       element.classList.toggle("done", slot !== null);
       element.classList.toggle("active", active);
-      element.classList.toggle("guide-active", guided && active);
-      element.setAttribute("aria-label", ariaLabel(tongue, slot, active, guided));
+      element.classList.toggle("guide-now", role === "now");
+      element.classList.toggle("guide-next", role === "next");
+      element.classList.toggle("guide-after", role === "after");
+      element.setAttribute("aria-label", ariaLabel(tongue, slot, active, role));
 
-      if (active) element.setAttribute("aria-current", "true");
+      const current = guided ? role === "now" : active;
+      if (current) element.setAttribute("aria-current", "true");
       else element.removeAttribute("aria-current");
 
       noteElements[index].textContent = slot === null ? "" : slot.label;
+
+      badge.classList.toggle("hidden", role === null);
+      badge.classList.toggle("guide-badge-now", role === "now");
+      badge.classList.toggle("guide-badge-next", role === "next");
+      badge.classList.toggle("guide-badge-after", role === "after");
+      badgeTextElements[index].textContent =
+        role === null ? "" : String(GUIDE_ROLES[role]);
     });
   }
 
-  function setGuideIndices(indices) {
-    guideIndices = indices === null ? null : new Set(indices);
+  function setGuideLookahead(lookahead) {
+    if (lookahead === null) {
+      guideRoles = null;
+    } else {
+      guideRoles = new Map();
+      for (const role of ["now", "next", "after"]) {
+        for (const index of lookahead[role] || []) {
+          if (!guideRoles.has(index)) guideRoles.set(index, role);
+        }
+      }
+    }
     update();
   }
 
   function activate(index) {
-    if (guideIndices !== null) return;
+    if (guideRoles !== null) return;
     session.selectSlot(index);
     update();
     if (typeof options.onSelect === "function") options.onSelect(index);
@@ -206,5 +263,5 @@ export function createDrumView(layout, session, options = {}) {
 
   update();
 
-  return { element: svg, update, setGuideIndices };
+  return { element: svg, update, setGuideLookahead };
 }
