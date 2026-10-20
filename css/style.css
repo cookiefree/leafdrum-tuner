@@ -146,6 +146,18 @@ body {
   color: #e8eaed;
 }
 
+.debug-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.debug-actions .button {
+  min-height: 2.75rem;
+  padding: 0.625rem 0.5rem;
+  font-size: 0.875rem;
+}
+
 .diagnostics {
   margin: 0 0 1.5rem;
   font-size: 0.8125rem;
