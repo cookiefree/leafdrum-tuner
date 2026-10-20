@@ -335,6 +335,41 @@ body {
   color: #bdc1c6;
 }
 
+.manual-note {
+  margin: 0.75rem 0 0;
+}
+
+.manual-note > label {
+  display: block;
+  margin-bottom: 0.375rem;
+  font-size: 0.875rem;
+  color: #bdc1c6;
+}
+
+.manual-note-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.manual-note input {
+  flex: 1;
+  min-width: 0;
+  min-height: 2.75rem;
+  padding: 0 0.5rem;
+  font-size: 1rem;
+  border: 1px solid #3c4043;
+  border-radius: 0.5rem;
+  background: #1e2126;
+  color: #e8eaed;
+}
+
+.manual-note .button {
+  flex: 0 0 auto;
+  min-height: 2.75rem;
+  padding: 0.5rem 1.25rem;
+  font-size: 1rem;
+}
+
 .sorted {
   margin-bottom: 1.5rem;
 }

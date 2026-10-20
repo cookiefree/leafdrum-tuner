@@ -10,9 +10,10 @@ import {
 } from "./audio.js";
 import { createDrumView } from "./drumview.js";
 import layout from "./layout.js";
-import { describeFreq } from "./notes.js";
+import { describeFreq, midiToFreq } from "./notes.js";
 import { StrikeDetector } from "./onset.js";
 import { Session } from "./session.js";
+import { parseNote } from "./songguide.js";
 
 const A4_DEFAULT = 440;
 const DASH = "-";
@@ -31,6 +32,7 @@ const STORAGE_KEYS = {
   gate: "leafdrum.gate",
   inputGain: "leafdrum.inputGain",
   diagnostics: "leafdrum.diagnostics",
+  drumMap: "leafdrum.drumMap",
 };
 
 const SUPPORT_MESSAGES = {
@@ -55,6 +57,14 @@ function writeStored(key, value) {
     window.localStorage.setItem(key, JSON.stringify(value));
   } catch {
     // Storage can be blocked (private mode, denied cookies); settings just do not persist.
+  }
+}
+
+function removeStored(key) {
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // Storage can be blocked; there is nothing else to clear.
   }
 }
 
@@ -143,6 +153,13 @@ app.innerHTML = `
     <h2 id="drum-title" class="section-title">Your drum</h2>
     <div id="drum-view" class="drum-view"></div>
     <p id="drum-caption" class="drum-caption" aria-live="polite"></p>
+    <form id="manual-note-form" class="manual-note">
+      <label for="manual-note">Set note manually</label>
+      <div class="manual-note-row">
+        <input id="manual-note" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="E4">
+        <button class="button secondary" type="submit">Set</button>
+      </div>
+    </form>
   </section>
   <section id="sorted" class="sorted hidden">
     <h2 class="section-title">Sorted by pitch</h2>
@@ -176,6 +193,8 @@ const centsLine = document.getElementById("cents");
 const meterMarker = document.getElementById("meter-marker");
 const drumContainer = document.getElementById("drum-view");
 const drumCaption = document.getElementById("drum-caption");
+const manualNoteForm = document.getElementById("manual-note-form");
+const manualNoteInput = document.getElementById("manual-note");
 const sortedSection = document.getElementById("sorted");
 const sortedNotes = document.getElementById("sorted-notes");
 const sortedSummary = document.getElementById("sorted-summary");
@@ -273,6 +292,39 @@ function persistSettings() {
   writeStored(STORAGE_KEYS.diagnostics, showDiagnostics);
 }
 
+function isStoredSlot(record) {
+  return (
+    record !== null &&
+    typeof record === "object" &&
+    Number.isInteger(record.midi) &&
+    typeof record.name === "string" &&
+    Number.isInteger(record.octave) &&
+    typeof record.label === "string" &&
+    Number.isFinite(record.cents) &&
+    Number.isFinite(record.freq)
+  );
+}
+
+function persistDrumMap() {
+  writeStored(STORAGE_KEYS.drumMap, session.slots);
+}
+
+function clearDrumMap() {
+  removeStored(STORAGE_KEYS.drumMap);
+}
+
+function restoreDrumMap() {
+  const stored = readStored(STORAGE_KEYS.drumMap, Array.isArray);
+  if (stored === null) return;
+  const limit = Math.min(stored.length, session.leafCount);
+  for (let index = 0; index < limit; index += 1) {
+    if (!isStoredSlot(stored[index])) continue;
+    session.selectSlot(index);
+    session.addStrike(stored[index]);
+  }
+  persistDrumMap();
+}
+
 function gateToSlider(gateHz) {
   const ratio = Math.log(gateHz / MIN_GATE) / Math.log(MAX_GATE / MIN_GATE);
   return Math.round(Math.min(1, Math.max(0, ratio)) * 100);
@@ -336,9 +388,16 @@ function updateDrumCaption() {
   drumCaption.textContent = `Play: ${tongue.label} (${session.activeSlot + 1} of ${layout.tongues.length})`;
 }
 
+function updateManualNoteForm() {
+  const visible = session.activeSlot !== null;
+  manualNoteForm.classList.toggle("hidden", !visible);
+  if (!visible) manualNoteInput.value = "";
+}
+
 function renderDrum() {
   drumView.update();
   updateDrumCaption();
+  updateManualNoteForm();
 }
 
 function summaryText(sorted) {
@@ -415,6 +474,7 @@ function requestA4(newA4) {
   addDebugLineNow(`settings: A4 ${a4} Hz`);
   if (recordedCount > 0) {
     session.reset();
+    clearDrumMap();
     renderDrum();
     renderSorted();
     setFeedback("Recorded tongues were cleared after the reference pitch change.");
@@ -481,6 +541,7 @@ function handleStrikeEvent(event) {
   const result = session.addStrike(record);
 
   if (result.status === "filled") {
+    persistDrumMap();
     setFeedback(`Recorded ${record.label} on ${layout.tongues[result.slot].label}`);
     renderDrum();
     renderSorted();
@@ -571,7 +632,9 @@ function describeAudioError(error) {
 
 const drumView = createDrumView(layout, session, {
   onSelect() {
+    manualNoteInput.value = "";
     updateDrumCaption();
+    updateManualNoteForm();
   },
 });
 drumContainer.append(drumView.element);
@@ -666,8 +729,47 @@ toggleButton.addEventListener("click", async () => {
   }
 });
 
+manualNoteForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (session.activeSlot === null) {
+    updateManualNoteForm();
+    setFeedback("All tongues recorded.");
+    return;
+  }
+
+  const midi = parseNote(manualNoteInput.value.trim());
+  if (midi === null) {
+    setFeedback("Enter a note like E4.");
+    manualNoteInput.select();
+    return;
+  }
+
+  const record = describeFreq(midiToFreq(midi, a4), a4);
+  const result = session.addStrike(record);
+
+  if (result.status === "filled") {
+    persistDrumMap();
+    manualNoteInput.value = "";
+    renderDrum();
+    renderSorted();
+    setFeedback(`Set ${record.label} on ${layout.tongues[result.slot].label}`);
+    if (session.activeSlot !== null) manualNoteInput.focus();
+    return;
+  }
+
+  if (result.status === "duplicate") {
+    setFeedback(`Already recorded on ${layout.tongues[result.existingSlot].label}`);
+    manualNoteInput.select();
+    return;
+  }
+
+  updateManualNoteForm();
+  setFeedback("All tongues recorded.");
+});
+
 resetButton.addEventListener("click", () => {
   session.reset();
+  clearDrumMap();
   renderDrum();
   renderSorted();
   setFeedback("Cleared all tongues.");
@@ -685,6 +787,7 @@ if (supportIssue) {
   statusLine.textContent = SUPPORT_MESSAGES[supportIssue];
 }
 
+restoreDrumMap();
 renderDrum();
 renderSorted();
 syncSettingsControls();
