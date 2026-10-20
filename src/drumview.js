@@ -72,15 +72,17 @@ function crownPosition(placement, crown) {
   };
 }
 
-function ariaLabel(tongue, slot, active) {
+function ariaLabel(tongue, slot, active, guided) {
   const state = slot === null ? "Waiting" : slot.label;
-  return `${tongue.label}. ${state}.${active ? " Next to play." : ""}`;
+  if (!active) return `${tongue.label}. ${state}.`;
+  return `${tongue.label}. ${state}. ${guided ? "Play this note now." : "Next to play."}`;
 }
 
 export function createDrumView(layout, session, options = {}) {
   const groups = groupTongues(layout);
   const tongueElements = new Array(layout.tongues.length);
   const noteElements = new Array(layout.tongues.length);
+  let guideIndices = null;
 
   const svg = createSvgElement("svg", {
     viewBox: `0 0 ${VIEW_SIZE} ${VIEW_SIZE}`,
@@ -157,15 +159,17 @@ export function createDrumView(layout, session, options = {}) {
   svg.append(labels);
 
   function update() {
+    const guided = guideIndices !== null;
     layout.tongues.forEach((tongue, index) => {
       const slot = session.slots[index];
-      const active = session.activeSlot === index;
+      const active = guided ? guideIndices.has(index) : session.activeSlot === index;
       const element = tongueElements[index];
 
       element.classList.toggle("pending", slot === null);
       element.classList.toggle("done", slot !== null);
       element.classList.toggle("active", active);
-      element.setAttribute("aria-label", ariaLabel(tongue, slot, active));
+      element.classList.toggle("guide-active", guided && active);
+      element.setAttribute("aria-label", ariaLabel(tongue, slot, active, guided));
 
       if (active) element.setAttribute("aria-current", "true");
       else element.removeAttribute("aria-current");
@@ -174,7 +178,13 @@ export function createDrumView(layout, session, options = {}) {
     });
   }
 
+  function setGuideIndices(indices) {
+    guideIndices = indices === null ? null : new Set(indices);
+    update();
+  }
+
   function activate(index) {
+    if (guideIndices !== null) return;
     session.selectSlot(index);
     update();
     if (typeof options.onSelect === "function") options.onSelect(index);
@@ -196,5 +206,5 @@ export function createDrumView(layout, session, options = {}) {
 
   update();
 
-  return { element: svg, update };
+  return { element: svg, update, setGuideIndices };
 }

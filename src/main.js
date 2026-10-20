@@ -13,7 +13,14 @@ import layout from "./layout.js";
 import { describeFreq, midiToFreq } from "./notes.js";
 import { StrikeDetector } from "./onset.js";
 import { Session } from "./session.js";
-import { parseNote } from "./songguide.js";
+import {
+  SongGuide,
+  bestTransposition,
+  coverage,
+  mapSong,
+  parseNote,
+  parseSong,
+} from "./songguide.js";
 
 const A4_DEFAULT = 440;
 const DASH = "-";
@@ -33,6 +40,7 @@ const STORAGE_KEYS = {
   inputGain: "leafdrum.inputGain",
   diagnostics: "leafdrum.diagnostics",
   drumMap: "leafdrum.drumMap",
+  song: "leafdrum.song",
 };
 
 const SUPPORT_MESSAGES = {
@@ -98,6 +106,13 @@ if (storedDiagnostics !== null) showDiagnostics = storedDiagnostics;
 const detector = new StrikeDetector({ a4, gate });
 const session = new Session(layout.tongues.length);
 
+let songNotes = [];
+let songShift = 0;
+let songFrom = 1;
+let songTo = 1;
+let activeGuide = null;
+let guideMode = false;
+
 const app = document.getElementById("app");
 
 app.innerHTML = `
@@ -161,6 +176,43 @@ app.innerHTML = `
       </div>
     </form>
   </section>
+  <section class="song-guide" aria-labelledby="song-guide-title">
+    <details>
+      <summary id="song-guide-title">Song guide</summary>
+      <div class="song-guide-body">
+        <label class="song-label" for="song-text">Paste notes, e.g. E4 G4 B4 - A4</label>
+        <textarea id="song-text" rows="4" autocomplete="off" spellcheck="false" placeholder="Paste notes, e.g. E4 G4 B4 - A4"></textarea>
+        <p id="song-parse-status" class="song-status" aria-live="polite"></p>
+        <p id="song-coverage" class="song-status" aria-live="polite">Playable: 0 of 0 notes</p>
+        <p id="song-missing" class="song-missing hidden"></p>
+        <div class="song-shift-grid">
+          <button id="song-best-key" class="button secondary song-wide" type="button">Find best key</button>
+          <button id="song-shift-down" class="button secondary" type="button">Shift -1</button>
+          <button id="song-shift-up" class="button secondary" type="button">Shift +1</button>
+        </div>
+        <p class="song-shift-line">Shift: <span id="song-shift-value">0</span> semitones</p>
+        <p id="song-shift-status" class="song-status" aria-live="polite"></p>
+        <div class="song-range">
+          <label for="song-from">From note #<input id="song-from" type="number" min="1" step="1" inputmode="numeric"></label>
+          <label for="song-to">To note #<input id="song-to" type="number" min="1" step="1" inputmode="numeric"></label>
+        </div>
+        <div class="song-options">
+          <label><input id="song-skip-missing" type="checkbox" checked>Skip notes my drum can't play</label>
+          <label><input id="song-any-octave" type="checkbox">Accept any octave</label>
+        </div>
+        <div class="song-actions">
+          <button id="song-start" class="button primary" type="button">Start guide</button>
+          <button id="song-clear" class="button secondary" type="button">Clear</button>
+        </div>
+        <div id="song-guide-controls" class="song-guide-controls hidden">
+          <button id="song-skip" class="button secondary" type="button">Skip</button>
+          <button id="song-back" class="button secondary" type="button">Back</button>
+          <button id="song-restart" class="button secondary" type="button">Restart</button>
+          <button id="song-exit" class="button secondary" type="button">Exit guide</button>
+        </div>
+      </div>
+    </details>
+  </section>
   <section id="sorted" class="sorted hidden">
     <h2 class="section-title">Sorted by pitch</h2>
     <div id="sorted-notes" class="sorted-notes"></div>
@@ -195,6 +247,26 @@ const drumContainer = document.getElementById("drum-view");
 const drumCaption = document.getElementById("drum-caption");
 const manualNoteForm = document.getElementById("manual-note-form");
 const manualNoteInput = document.getElementById("manual-note");
+const songTextarea = document.getElementById("song-text");
+const songParseStatus = document.getElementById("song-parse-status");
+const songCoverageLine = document.getElementById("song-coverage");
+const songMissingLine = document.getElementById("song-missing");
+const songShiftValue = document.getElementById("song-shift-value");
+const songShiftStatus = document.getElementById("song-shift-status");
+const songFromInput = document.getElementById("song-from");
+const songToInput = document.getElementById("song-to");
+const songSkipMissing = document.getElementById("song-skip-missing");
+const songAnyOctave = document.getElementById("song-any-octave");
+const songBestKeyButton = document.getElementById("song-best-key");
+const songShiftDownButton = document.getElementById("song-shift-down");
+const songShiftUpButton = document.getElementById("song-shift-up");
+const songStartButton = document.getElementById("song-start");
+const songClearButton = document.getElementById("song-clear");
+const songGuideControls = document.getElementById("song-guide-controls");
+const songSkipButton = document.getElementById("song-skip");
+const songBackButton = document.getElementById("song-back");
+const songRestartButton = document.getElementById("song-restart");
+const songExitButton = document.getElementById("song-exit");
 const sortedSection = document.getElementById("sorted");
 const sortedNotes = document.getElementById("sorted-notes");
 const sortedSummary = document.getElementById("sorted-summary");
@@ -389,15 +461,16 @@ function updateDrumCaption() {
 }
 
 function updateManualNoteForm() {
-  const visible = session.activeSlot !== null;
+  const visible = !guideMode && session.activeSlot !== null;
   manualNoteForm.classList.toggle("hidden", !visible);
   if (!visible) manualNoteInput.value = "";
 }
 
 function renderDrum() {
   drumView.update();
-  updateDrumCaption();
+  if (!guideMode) updateDrumCaption();
   updateManualNoteForm();
+  updateSongCoverage();
 }
 
 function summaryText(sorted) {
@@ -430,6 +503,279 @@ function renderSorted() {
     sortedSummary.classList.add("hidden");
     sortedSummary.textContent = "";
   }
+}
+
+function availableDrumMidis() {
+  return session.slots.filter((slot) => slot !== null).map((slot) => slot.midi);
+}
+
+function drumMapMidis() {
+  return session.slots.map((slot) => (slot === null ? null : slot.midi));
+}
+
+function updateSongCoverage() {
+  const result = coverage(songNotes, availableDrumMidis(), songShift);
+  songCoverageLine.textContent = `Playable: ${result.playable} of ${result.total} notes`;
+
+  if (result.missing.length === 0) {
+    songMissingLine.textContent = "";
+    songMissingLine.classList.add("hidden");
+    return;
+  }
+
+  const missing = result.missing
+    .map(({ name, count }) => (count > 1 ? `${name} x${count}` : name))
+    .join(", ");
+  songMissingLine.textContent = `Missing: ${missing}`;
+  songMissingLine.classList.remove("hidden");
+}
+
+function updateSongShiftDisplay() {
+  songShiftValue.textContent = String(songShift);
+}
+
+function shiftText(shift) {
+  return `shifted by ${shift} semitone${Math.abs(shift) === 1 ? "" : "s"}`;
+}
+
+function announceShift() {
+  songShiftStatus.textContent = shiftText(songShift);
+}
+
+function updateSongParseStatus(errors) {
+  const count = songNotes.length;
+  let text = `${count} note${count === 1 ? "" : "s"} read.`;
+  if (errors.length > 0) {
+    const tokens = [...new Set(errors.map((error) => error.token))];
+    text += ` Unreadable: ${tokens.join(", ")}.`;
+  }
+  songParseStatus.textContent = text;
+}
+
+function persistSong() {
+  writeStored(STORAGE_KEYS.song, {
+    text: songTextarea.value,
+    shift: songShift,
+    from: songFrom,
+    to: songTo,
+  });
+}
+
+function setSongRangeToWhole() {
+  const total = songNotes.length;
+  songFrom = 1;
+  songTo = total > 0 ? total : 1;
+  songFromInput.value = total > 0 ? "1" : "";
+  songToInput.value = total > 0 ? String(total) : "";
+  songFromInput.max = total > 0 ? String(total) : "";
+  songToInput.max = total > 0 ? String(total) : "";
+}
+
+function clampSongRange() {
+  const total = songNotes.length;
+  if (total === 0) {
+    setSongRangeToWhole();
+    return;
+  }
+
+  let from = Number(songFromInput.value);
+  let to = Number(songToInput.value);
+  if (!Number.isInteger(from) || from < 1) from = 1;
+  if (!Number.isInteger(to) || to < 1) to = total;
+  if (from > total) from = 1;
+  if (to > total) to = total;
+  if (from > to) {
+    from = 1;
+    to = total;
+  }
+
+  songFrom = from;
+  songTo = to;
+  songFromInput.value = String(from);
+  songToInput.value = String(to);
+  songFromInput.max = String(total);
+  songToInput.max = String(total);
+}
+
+function applySongText({ resetRange = false, persist = true } = {}) {
+  const { notes, errors } = parseSong(songTextarea.value);
+  songNotes = notes;
+
+  if (resetRange) setSongRangeToWhole();
+  else clampSongRange();
+
+  updateSongParseStatus(errors);
+  updateSongCoverage();
+  if (persist) persistSong();
+}
+
+function loadSongState() {
+  const stored = readStored(
+    STORAGE_KEYS.song,
+    (value) => value !== null && typeof value === "object" && typeof value.text === "string",
+  );
+
+  if (stored === null) {
+    songTextarea.value = "";
+    updateSongShiftDisplay();
+    applySongText({ resetRange: true, persist: false });
+    return;
+  }
+
+  songTextarea.value = stored.text;
+  songShift = Number.isInteger(stored.shift) ? stored.shift : 0;
+  songFrom = Number.isInteger(stored.from) ? stored.from : 1;
+  songTo = Number.isInteger(stored.to) ? stored.to : 1;
+  songFromInput.value = String(songFrom);
+  songToInput.value = String(songTo);
+  updateSongShiftDisplay();
+  applySongText({ resetRange: false, persist: false });
+  if (songShift !== 0) announceShift();
+  else songShiftStatus.textContent = "";
+}
+
+function findBestKey() {
+  if (songNotes.length === 0) {
+    setFeedback("Paste notes first.");
+    return;
+  }
+
+  const available = availableDrumMidis();
+  if (available.length === 0) {
+    setFeedback("Record some tongues first.");
+    return;
+  }
+
+  const best = bestTransposition(songNotes, available);
+  songShift = best.semitones;
+  updateSongShiftDisplay();
+  updateSongCoverage();
+  announceShift();
+  persistSong();
+}
+
+function adjustSongShift(delta) {
+  if (songNotes.length === 0) {
+    setFeedback("Paste notes first.");
+    return;
+  }
+
+  songShift += delta;
+  updateSongShiftDisplay();
+  updateSongCoverage();
+  announceShift();
+  persistSong();
+}
+
+function guideTargetLabel() {
+  const current = activeGuide ? activeGuide.current() : null;
+  if (!current) return "no tongue";
+  if (current.indices.length === 0) return "no playable tongue";
+  return layout.tongues[current.indices[0]].label;
+}
+
+function setGuideMode(on) {
+  guideMode = on;
+  songTextarea.disabled = on;
+  songBestKeyButton.disabled = on;
+  songShiftDownButton.disabled = on;
+  songShiftUpButton.disabled = on;
+  songFromInput.disabled = on;
+  songToInput.disabled = on;
+  songSkipMissing.disabled = on;
+  songAnyOctave.disabled = on;
+  songClearButton.disabled = on;
+  resetButton.disabled = on;
+  songStartButton.classList.toggle("hidden", on);
+  songGuideControls.classList.toggle("hidden", !on);
+  updateManualNoteForm();
+}
+
+function updateGuideView() {
+  if (!activeGuide) return;
+  const current = activeGuide.current();
+
+  if (!current) {
+    drumView.setGuideIndices([]);
+    drumCaption.textContent = "Finished";
+    return;
+  }
+
+  drumView.setGuideIndices(current.indices);
+  const next = activeGuide.peekNext();
+  const total = activeGuide.steps.length;
+  const nextText = next ? `  next: ${next.name}` : "";
+  drumCaption.textContent = `Play: ${current.name} (note ${current.n + 1} of ${total})${nextText}`;
+}
+
+function startGuide() {
+  if (songNotes.length === 0) {
+    setFeedback("Paste notes first.");
+    return;
+  }
+
+  clampSongRange();
+  persistSong();
+  const steps = mapSong(songNotes, drumMapMidis(), songShift);
+  activeGuide = new SongGuide(steps, {
+    skipMissing: songSkipMissing.checked,
+    anyOctave: songAnyOctave.checked,
+    start: songFrom - 1,
+    end: songTo,
+  });
+
+  setGuideMode(true);
+  updateGuideView();
+  if (activeGuide.done) setFeedback("Finished");
+  else setFeedback(`Guide started at note ${activeGuide.current().n + 1}.`);
+}
+
+function exitGuide() {
+  activeGuide = null;
+  setGuideMode(false);
+  drumView.setGuideIndices(null);
+  renderDrum();
+  setFeedback("Guide ended. Scan mode is active.");
+}
+
+function skipGuide() {
+  if (!activeGuide) return;
+  activeGuide.skip();
+  updateGuideView();
+  setFeedback(activeGuide.done ? "Finished" : "Skipped.");
+}
+
+function backGuide() {
+  if (!activeGuide) return;
+  activeGuide.back();
+  updateGuideView();
+  setFeedback("Back one note.");
+}
+
+function restartGuide() {
+  if (!activeGuide) return;
+  activeGuide.restart();
+  updateGuideView();
+  setFeedback(activeGuide.done ? "Finished" : "Restarted.");
+}
+
+function clearSong() {
+  if (guideMode) return;
+  songTextarea.value = "";
+  songNotes = [];
+  songShift = 0;
+  songFrom = 1;
+  songTo = 1;
+  songFromInput.value = "";
+  songToInput.value = "";
+  songFromInput.max = "";
+  songToInput.max = "";
+  updateSongShiftDisplay();
+  songShiftStatus.textContent = "";
+  songParseStatus.textContent = "";
+  updateSongCoverage();
+  removeStored(STORAGE_KEYS.song);
+  setFeedback("Song guide cleared.");
 }
 
 function syncSettingsControls() {
@@ -519,9 +865,11 @@ function handleStrikeEvent(event) {
     addDebugLine(event.time, `FAILED ${event.reason}`);
     lastStrikeText = `last strike: failed (${event.reason})`;
     setFeedback(
-      event.reason === "inconsistent"
-        ? "Unclear note (two tongues at once, or the previous sound still ringing). Let it fade and try again."
-        : "Could not read that strike, try again",
+      guideMode
+        ? "Could not read, try again"
+        : event.reason === "inconsistent"
+          ? "Unclear note (two tongues at once, or the previous sound still ringing). Let it fade and try again."
+          : "Could not read that strike, try again",
     );
     return;
   }
@@ -529,8 +877,9 @@ function handleStrikeEvent(event) {
   diagnosticsStats.ok += 1;
   lastStrikeText = `last strike: ${event.readingsUsed}/${event.readingsTotal} readings, ${event.freq.toFixed(1)} Hz`;
   const record = describeFreq(event.freq, a4);
-  const targetLabel =
-    session.activeSlot === null
+  const targetLabel = guideMode
+    ? guideTargetLabel()
+    : session.activeSlot === null
       ? "no empty tongue"
       : layout.tongues[session.activeSlot].label;
   const centsSign = record.cents >= 0 ? "+" : "-";
@@ -538,6 +887,22 @@ function handleStrikeEvent(event) {
     event.time,
     `strike ${targetLabel} -> ${record.label} ${record.freq.toFixed(1)} Hz ${centsSign}${Math.abs(record.cents).toFixed(1)} cents (${event.readingsUsed}/${event.readingsTotal} readings)`,
   );
+
+  if (guideMode) {
+    if (!activeGuide) {
+      setFeedback("Finished");
+      return;
+    }
+    const guideResult = activeGuide.heard(event.midi);
+    if (guideResult.result === "wrong") {
+      setFeedback(`Heard ${guideResult.heardName}, expected ${guideResult.expected.name}`);
+      return;
+    }
+    updateGuideView();
+    setFeedback(activeGuide.done ? "Finished" : "Correct");
+    return;
+  }
+
   const result = session.addStrike(record);
 
   if (result.status === "filled") {
@@ -731,6 +1096,7 @@ toggleButton.addEventListener("click", async () => {
 
 manualNoteForm.addEventListener("submit", (event) => {
   event.preventDefault();
+  if (guideMode) return;
   if (session.activeSlot === null) {
     updateManualNoteForm();
     setFeedback("All tongues recorded.");
@@ -767,6 +1133,30 @@ manualNoteForm.addEventListener("submit", (event) => {
   setFeedback("All tongues recorded.");
 });
 
+songTextarea.addEventListener("input", () => {
+  applySongText({ resetRange: true });
+});
+
+songFromInput.addEventListener("change", () => {
+  clampSongRange();
+  persistSong();
+});
+
+songToInput.addEventListener("change", () => {
+  clampSongRange();
+  persistSong();
+});
+
+songBestKeyButton.addEventListener("click", findBestKey);
+songShiftDownButton.addEventListener("click", () => adjustSongShift(-1));
+songShiftUpButton.addEventListener("click", () => adjustSongShift(1));
+songStartButton.addEventListener("click", startGuide);
+songClearButton.addEventListener("click", clearSong);
+songSkipButton.addEventListener("click", skipGuide);
+songBackButton.addEventListener("click", backGuide);
+songRestartButton.addEventListener("click", restartGuide);
+songExitButton.addEventListener("click", exitGuide);
+
 resetButton.addEventListener("click", () => {
   session.reset();
   clearDrumMap();
@@ -788,6 +1178,7 @@ if (supportIssue) {
 }
 
 restoreDrumMap();
+loadSongState();
 renderDrum();
 renderSorted();
 syncSettingsControls();
