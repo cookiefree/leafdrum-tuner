@@ -4,12 +4,6 @@
   box-sizing: border-box;
 }
 
-:root {
-  --guide-now: #8ab4f8;
-  --guide-next: #46bfd0;
-  --guide-after: #3fd0a0;
-}
-
 html {
   height: 100%;
 }
@@ -319,33 +313,8 @@ body {
   stroke: #8ab4f8;
 }
 
-.drum-tongue.guide-now .tongue-halo {
-  stroke: var(--guide-now);
-  stroke-width: 32px;
-  opacity: 0.95;
-}
-
-.drum-tongue.guide-next .tongue-halo {
-  stroke: var(--guide-next);
-  opacity: 0.78;
-}
-
-.drum-tongue.guide-after .tongue-halo {
-  stroke: var(--guide-after);
-  opacity: 0.62;
-}
-
-.drum-tongue.guide-now.active .tongue-band {
-  stroke: var(--guide-now);
-  stroke-width: 19px;
-}
-
-.drum-tongue.guide-next.active .tongue-band {
-  stroke: var(--guide-next);
-}
-
-.drum-tongue.guide-after.active .tongue-band {
-  stroke: var(--guide-after);
+.drum-tongue.guide-current .tongue-band {
+  stroke: #8ab4f8;
 }
 
 .tongue-note {
@@ -364,41 +333,17 @@ body {
   pointer-events: none;
 }
 
-.guide-badge-disc {
+.guide-badge-pill {
   fill: #121417;
-  stroke: var(--guide-now);
-  stroke-width: 2;
+  stroke: #f1f3f4;
+  stroke-width: 1.5;
 }
 
 .guide-badge-text {
-  fill: var(--guide-now);
+  fill: #f8f9fa;
   font-family: inherit;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 700;
-}
-
-.guide-badge-now .guide-badge-disc {
-  stroke: var(--guide-now);
-}
-
-.guide-badge-now .guide-badge-text {
-  fill: var(--guide-now);
-}
-
-.guide-badge-next .guide-badge-disc {
-  stroke: var(--guide-next);
-}
-
-.guide-badge-next .guide-badge-text {
-  fill: var(--guide-next);
-}
-
-.guide-badge-after .guide-badge-disc {
-  stroke: var(--guide-after);
-}
-
-.guide-badge-after .guide-badge-text {
-  fill: var(--guide-after);
 }
 
 .drum-caption {

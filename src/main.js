@@ -696,17 +696,16 @@ function updateGuideView() {
   const current = activeGuide.current();
 
   if (!current) {
-    drumView.setGuideLookahead({ now: [], next: [], after: [] });
+    drumView.setGuideLookahead([]);
     drumCaption.textContent = "Finished";
     return;
   }
 
   const upcoming = activeGuide.upcoming(2);
-  drumView.setGuideLookahead({
-    now: current.indices,
-    next: upcoming[0] ? upcoming[0].indices : [],
-    after: upcoming[1] ? upcoming[1].indices : [],
-  });
+  drumView.setGuideLookahead([
+    current.indices,
+    ...upcoming.map((step) => step.indices),
+  ]);
   const next = activeGuide.peekNext();
   const total = activeGuide.steps.length;
   const nextText = next ? `  next: ${next.name}` : "";
