@@ -342,8 +342,23 @@ body {
 .guide-badge-text {
   fill: #f8f9fa;
   font-family: inherit;
-  font-size: 14px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.guide-number-played {
+  fill: #8f959b;
+  font-weight: 500;
+}
+
+.guide-number-future {
+  fill: #d5d8dc;
+  font-weight: 600;
+}
+
+.guide-number-current {
+  fill: #ffffff;
+  font-weight: 800;
 }
 
 .drum-caption {

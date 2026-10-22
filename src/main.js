@@ -111,6 +111,7 @@ let songShift = 0;
 let songFrom = 1;
 let songTo = 1;
 let activeGuide = null;
+let guideMap = null;
 let guideMode = false;
 
 const app = document.getElementById("app");
@@ -674,6 +675,25 @@ function guideTargetLabel() {
   return layout.tongues[current.indices[0]].label;
 }
 
+function buildGuideMap(guide) {
+  const numbersByTongue = new Map();
+  const numberByStep = new Map();
+  let total = 0;
+
+  for (let pos = guide.start; pos < guide.end; pos++) {
+    const step = guide.steps[pos];
+    if (guide.skipMissing && step.missing) continue;
+    total += 1;
+    numberByStep.set(step.n, total);
+    for (const index of step.indices) {
+      if (!numbersByTongue.has(index)) numbersByTongue.set(index, []);
+      numbersByTongue.get(index).push(total);
+    }
+  }
+
+  return { numbersByTongue, numberByStep, total };
+}
+
 function setGuideMode(on) {
   guideMode = on;
   songTextarea.disabled = on;
@@ -696,20 +716,15 @@ function updateGuideView() {
   const current = activeGuide.current();
 
   if (!current) {
-    drumView.setGuideLookahead([]);
+    drumView.setGuideProgress(null);
     drumCaption.textContent = "Finished";
     return;
   }
 
-  const upcoming = activeGuide.upcoming(2);
-  drumView.setGuideLookahead([
-    current.indices,
-    ...upcoming.map((step) => step.indices),
-  ]);
-  const next = activeGuide.peekNext();
-  const total = activeGuide.steps.length;
-  const nextText = next ? `  next: ${next.name}` : "";
-  drumCaption.textContent = `Play: ${current.name} (note ${current.n + 1} of ${total})${nextText}`;
+  const number = guideMap ? guideMap.numberByStep.get(current.n) : null;
+  const total = guideMap ? guideMap.total : 0;
+  drumView.setGuideProgress(number);
+  drumCaption.textContent = `Play: ${current.name} (note ${number} of ${total})`;
 }
 
 function startGuide() {
@@ -727,17 +742,23 @@ function startGuide() {
     start: songFrom - 1,
     end: songTo,
   });
+  guideMap = buildGuideMap(activeGuide);
 
   setGuideMode(true);
+  drumView.setGuideMap(guideMap.numbersByTongue);
   updateGuideView();
   if (activeGuide.done) setFeedback("Finished");
-  else setFeedback(`Guide started at note ${activeGuide.current().n + 1}.`);
+  else {
+    const number = guideMap.numberByStep.get(activeGuide.current().n);
+    setFeedback(`Guide started at note ${number} of ${guideMap.total}.`);
+  }
 }
 
 function exitGuide() {
   activeGuide = null;
+  guideMap = null;
   setGuideMode(false);
-  drumView.setGuideLookahead(null);
+  drumView.setGuideMap(null);
   renderDrum();
   setFeedback("Guide ended. Scan mode is active.");
 }

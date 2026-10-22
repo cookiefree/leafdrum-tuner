@@ -5,11 +5,16 @@ const RING_RADIUS = 140;
 const RIM_RADIUS = 184;
 const CENTER_SCALE = 1.25;
 const HALO_EXTRA = 10;
-const BADGE_HEIGHT = 24;
-const BADGE_PADDING = 12;
-const BADGE_CLEARANCE = 16;
-const BADGE_ABOVE = 24;
+const BADGE_LINE_HEIGHT = 14;
+const BADGE_PADDING_X = 8;
+const BADGE_PADDING_Y = 4;
+const BADGE_NUMBER_GAP = 6;
+const BADGE_MAX_CONTENT_WIDTH = 52;
+const BADGE_CHAR_WIDTH = 7.5;
+const BADGE_CLEARANCE = 20;
+const BADGE_LABEL_CLEARANCE = 14;
 const BADGE_EDGE = 4;
+const BADGE_RADIUS = 9;
 
 const TONGUE_GEOMETRY = {
   big: { radius: 44, crown: -50, leg: 32, stroke: 15 },
@@ -77,22 +82,19 @@ function crownPosition(placement, crown) {
   };
 }
 
-function ariaLabel(tongue, slot, active, numbers = []) {
+function ariaLabel(tongue, slot, active, numbers = [], currentNumber = null) {
   const state = slot === null ? "Waiting" : slot.label;
   const base = `${tongue.label}. ${state}.`;
-  if (numbers.includes(1)) {
-    const others = numbers.filter((number) => number !== 1);
-    const extra = others.length
-      ? `, also step${others.length === 1 ? "" : "s"} ${others.join(" and ")}`
-      : "";
-    return `${base} Play this note now${extra}.`;
+  if (numbers.length === 0) return active ? `${base} Next to play.` : base;
+
+  const steps = numbers.length === 1 ? `step ${numbers[0]}` : `steps ${numbers.join(", ")}`;
+  if (currentNumber !== null && numbers.includes(currentNumber)) {
+    return `${base} ${steps}. Play step ${currentNumber} now.`;
   }
-  if (numbers.includes(2)) {
-    return `${base} Up next${numbers.includes(3) ? ", also step 3" : ""}.`;
-  }
-  if (numbers.includes(3)) return `${base} Coming after next.`;
-  if (!active) return base;
-  return `${base} Next to play.`;
+  if (currentNumber === null) return `${base} ${steps}. Guide finished.`;
+  const next = numbers.find((number) => number > currentNumber);
+  if (next !== undefined) return `${base} ${steps}. Next step ${next}.`;
+  return `${base} ${steps}. Already played.`;
 }
 
 export function createDrumView(layout, session, options = {}) {
@@ -102,8 +104,10 @@ export function createDrumView(layout, session, options = {}) {
   const badgeElements = new Array(layout.tongues.length);
   const badgePillElements = new Array(layout.tongues.length);
   const badgeTextElements = new Array(layout.tongues.length);
+  const badgeNumberElements = new Array(layout.tongues.length);
   const badgeAnchors = new Array(layout.tongues.length);
   let guideNumbers = null;
+  let guideCurrent = null;
 
   const svg = createSvgElement("svg", {
     viewBox: `0 0 ${VIEW_SIZE} ${VIEW_SIZE}`,
@@ -185,11 +189,11 @@ export function createDrumView(layout, session, options = {}) {
       const badgePill = createSvgElement("rect", {
         class: "guide-badge-pill",
         x: 0,
-        y: -BADGE_HEIGHT / 2,
+        y: 0,
         width: 0,
-        height: BADGE_HEIGHT,
-        rx: BADGE_HEIGHT / 2,
-        ry: BADGE_HEIGHT / 2,
+        height: 0,
+        rx: BADGE_RADIUS,
+        ry: BADGE_RADIUS,
       });
       const badgeText = createSvgElement("text", {
         class: "guide-badge-text",
@@ -200,6 +204,7 @@ export function createDrumView(layout, session, options = {}) {
       badgeElements[index] = badge;
       badgePillElements[index] = badgePill;
       badgeTextElements[index] = badgeText;
+      badgeNumberElements[index] = [];
       badgeAnchors[index] = { x: crown.x, y: crown.y };
       badges.append(badge);
     }
@@ -209,68 +214,170 @@ export function createDrumView(layout, session, options = {}) {
 
   svg.append(labels, badges);
 
+  function numberState(number) {
+    if (guideCurrent === null) return "played";
+    if (number === guideCurrent) return "current";
+    return number < guideCurrent ? "played" : "future";
+  }
+
+  function applyNumberState(item) {
+    item.tspan.setAttribute("class", `guide-number guide-number-${numberState(item.number)}`);
+  }
+
+  function layoutBadge(index, numbers) {
+    const badge = badgeElements[index];
+    const pill = badgePillElements[index];
+    const text = badgeTextElements[index];
+    const anchor = badgeAnchors[index];
+    text.replaceChildren();
+    badgeNumberElements[index] = [];
+
+    if (numbers.length === 0) {
+      badge.classList.add("hidden");
+      pill.setAttribute("width", "0");
+      pill.setAttribute("height", "0");
+      badge.removeAttribute("transform");
+      return;
+    }
+
+    badge.classList.remove("hidden");
+
+    const items = numbers.map((number) => {
+      const tspan = createSvgElement("tspan", {
+        x: 0,
+        y: 0,
+        class: "guide-number guide-number-current",
+      });
+      tspan.textContent = String(number);
+      text.append(tspan);
+      const measured = tspan.getComputedTextLength();
+      return {
+        number,
+        tspan,
+        width: measured > 0 ? measured : String(number).length * BADGE_CHAR_WIDTH,
+      };
+    });
+
+    const lines = [];
+    let line = [];
+    let lineWidth = 0;
+    for (const item of items) {
+      const nextWidth = line.length === 0 ? item.width : lineWidth + BADGE_NUMBER_GAP + item.width;
+      if (line.length > 0 && nextWidth > BADGE_MAX_CONTENT_WIDTH) {
+        lines.push({ items: line, width: lineWidth });
+        line = [];
+        lineWidth = 0;
+      }
+      lineWidth = line.length === 0 ? item.width : lineWidth + BADGE_NUMBER_GAP + item.width;
+      line.push(item);
+    }
+    if (line.length > 0) lines.push({ items: line, width: lineWidth });
+
+    const contentWidth = Math.max(...lines.map((entry) => entry.width));
+    const width = contentWidth + BADGE_PADDING_X * 2;
+    const height = lines.length * BADGE_LINE_HEIGHT + BADGE_PADDING_Y * 2;
+    const firstLineY = -height / 2 + BADGE_PADDING_Y + BADGE_LINE_HEIGHT / 2;
+
+    lines.forEach((entry, lineIndex) => {
+      let left = -entry.width / 2;
+      const y = firstLineY + lineIndex * BADGE_LINE_HEIGHT;
+      for (const item of entry.items) {
+        item.tspan.setAttribute("x", (left + item.width / 2).toFixed(2));
+        item.tspan.setAttribute("y", y.toFixed(2));
+        left += item.width + BADGE_NUMBER_GAP;
+      }
+    });
+
+    pill.setAttribute("x", String(-width / 2));
+    pill.setAttribute("y", String(-height / 2));
+    pill.setAttribute("width", String(width));
+    pill.setAttribute("height", String(height));
+    const radius = Math.min(BADGE_RADIUS, height / 2);
+    pill.setAttribute("rx", String(radius));
+    pill.setAttribute("ry", String(radius));
+
+    let x = anchor.x + BADGE_CLEARANCE + width / 2;
+    let y = anchor.y;
+    if (x + width / 2 > VIEW_SIZE - BADGE_EDGE) {
+      const leftX = anchor.x - BADGE_CLEARANCE - width / 2;
+      if (leftX - width / 2 >= BADGE_EDGE) {
+        x = leftX;
+      } else {
+        x = Math.max(
+          width / 2 + BADGE_EDGE,
+          Math.min(anchor.x, VIEW_SIZE - width / 2 - BADGE_EDGE),
+        );
+        const above = anchor.y - BADGE_LABEL_CLEARANCE - height / 2;
+        const below = anchor.y + BADGE_LABEL_CLEARANCE + height / 2;
+        if (above - height / 2 >= BADGE_EDGE) y = above;
+        else if (below + height / 2 <= VIEW_SIZE - BADGE_EDGE) y = below;
+        else {
+          y = Math.max(
+            height / 2 + BADGE_EDGE,
+            Math.min(anchor.y, VIEW_SIZE - height / 2 - BADGE_EDGE),
+          );
+        }
+      }
+    }
+    badge.setAttribute("transform", `translate(${x.toFixed(2)} ${y.toFixed(2)})`);
+
+    badgeNumberElements[index] = items;
+    items.forEach(applyNumberState);
+  }
+
   function update() {
     const guided = guideNumbers !== null;
     layout.tongues.forEach((tongue, index) => {
       const slot = session.slots[index];
-      const numbers = guided ? (guideNumbers.get(index) || []) : [];
-      const active = guided ? numbers.includes(1) : session.activeSlot === index;
+      const numbers = guided ? guideNumbers.get(index) || [] : [];
+      const active = guided
+        ? guideCurrent !== null && numbers.includes(guideCurrent)
+        : session.activeSlot === index;
       const element = tongueElements[index];
-      const badge = badgeElements[index];
-      const pill = badgePillElements[index];
-      const badgeText = badgeTextElements[index];
 
       element.classList.toggle("pending", slot === null);
       element.classList.toggle("done", slot !== null);
       element.classList.toggle("active", active);
       element.classList.toggle("guide-current", guided && active);
-      element.setAttribute("aria-label", ariaLabel(tongue, slot, active, numbers));
+      element.setAttribute(
+        "aria-label",
+        ariaLabel(tongue, slot, active, numbers, guided ? guideCurrent : null),
+      );
 
       if (active) element.setAttribute("aria-current", "true");
       else element.removeAttribute("aria-current");
 
       noteElements[index].textContent = slot === null ? "" : slot.label;
-
-      const visible = numbers.length > 0;
-      badge.classList.toggle("hidden", !visible);
-      badgeText.textContent = visible ? numbers.join(" · ") : "";
-      if (visible) {
-        const measured = badgeText.getComputedTextLength();
-        const width =
-          (measured > 0 ? measured : badgeText.textContent.length * 8) + BADGE_PADDING;
-        pill.setAttribute("x", String(-width / 2));
-        pill.setAttribute("width", String(width));
-
-        const anchor = badgeAnchors[index];
-        let x = anchor.x + BADGE_CLEARANCE + width / 2;
-        let y = anchor.y;
-        if (x + width / 2 > VIEW_SIZE - BADGE_EDGE) {
-          x = Math.min(anchor.x, VIEW_SIZE - width / 2 - BADGE_EDGE);
-          y = anchor.y - BADGE_ABOVE;
-        }
-        badge.setAttribute("transform", `translate(${x.toFixed(2)} ${y.toFixed(2)})`);
-      }
+      badgeElements[index].classList.toggle("hidden", numbers.length === 0);
+      for (const item of badgeNumberElements[index]) applyNumberState(item);
     });
   }
 
-  function setGuideLookahead(steps) {
-    if (steps === null) {
+  function setGuideMap(numbersByTongue) {
+    guideCurrent = null;
+    if (numbersByTongue === null) {
       guideNumbers = null;
     } else {
       guideNumbers = new Map();
-      steps.forEach((indices, stepIndex) => {
-        for (const index of indices || []) {
-          if (!guideNumbers.has(index)) guideNumbers.set(index, []);
-          const numbers = guideNumbers.get(index);
-          if (!numbers.includes(stepIndex + 1)) numbers.push(stepIndex + 1);
-        }
-      });
+      for (const [index, numbers] of numbersByTongue) {
+        guideNumbers.set(index, [...numbers].sort((a, b) => a - b));
+      }
     }
+
+    layout.tongues.forEach((_, index) => {
+      layoutBadge(index, guideNumbers ? guideNumbers.get(index) || [] : []);
+    });
+    update();
+  }
+
+  function setGuideProgress(number) {
+    guideCurrent = typeof number === "number" ? number : null;
     update();
   }
 
   function activate(index) {
     if (guideNumbers !== null) return;
+
     session.selectSlot(index);
     update();
     if (typeof options.onSelect === "function") options.onSelect(index);
@@ -292,5 +399,5 @@ export function createDrumView(layout, session, options = {}) {
 
   update();
 
-  return { element: svg, update, setGuideLookahead };
+  return { element: svg, update, setGuideMap, setGuideProgress };
 }
