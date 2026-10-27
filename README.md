@@ -76,7 +76,3 @@ Any modern browser with microphone access and the Web Audio API: current Chrome,
 - Some tongues are hard to read reliably, especially soft or very low ones. Accuracy depends on the drum, the room, and the phone mic.
 - Pitch is measured from the strike, so a muffled or doubled hit can give a wrong note. Strike again if a value looks off.
 - Fixed 9-leaf, 27-tongue layout for now.
-
-## License
-
-Add a license here (for example MIT) before sharing the repo publicly.
